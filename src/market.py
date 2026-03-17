@@ -11,6 +11,8 @@ to find active (non-closed) windows.
 import logging
 import asyncio
 import math
+import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -66,23 +68,86 @@ CHAINLINK_ABI = [
 POLYGON_RPCS = [config.POLYGON_RPC_URL] if config.POLYGON_RPC_URL else []
 POLYGON_RPCS.extend(config.POLYGON_RPC_FALLBACKS)
 
+# Rate limiting protection
+_rpc_failures = defaultdict(lambda: {"count": 0, "last_fail": 0})
+_last_request_time = defaultdict(float)
+CIRCUIT_BREAKER_THRESHOLD = 5
+CIRCUIT_BREAKER_COOLDOWN = 300
+MIN_REQUEST_INTERVAL = 0.2
+
+def _is_rate_limited(exception: Exception) -> bool:
+    """Check if exception is a 429 rate limit error."""
+    error_str = str(exception).lower()
+    return "429" in error_str or "too many requests" in error_str
+
+def _should_skip_rpc(rpc: str) -> bool:
+    """Check if RPC is in circuit breaker cooldown."""
+    state = _rpc_failures[rpc]
+    if state["count"] >= CIRCUIT_BREAKER_THRESHOLD:
+        if time.time() - state["last_fail"] < CIRCUIT_BREAKER_COOLDOWN:
+            return True
+        state["count"] = 0
+    return False
+
+def _record_rpc_failure(rpc: str, is_rate_limit: bool):
+    """Record RPC failure for circuit breaker."""
+    state = _rpc_failures[rpc]
+    state["count"] += 3 if is_rate_limit else 1
+    state["last_fail"] = time.time()
+
+def _throttle_request(rpc: str):
+    """Ensure minimum time between requests to same RPC."""
+    last = _last_request_time[rpc]
+    elapsed = time.time() - last
+    if elapsed < MIN_REQUEST_INTERVAL:
+        time.sleep(MIN_REQUEST_INTERVAL - elapsed)
+    _last_request_time[rpc] = time.time()
+
+def get_rpc_health_status() -> dict:
+    """Return health status of all RPCs for monitoring."""
+    return {
+        rpc: {
+            "failures": _rpc_failures[rpc]["count"],
+            "circuit_open": _should_skip_rpc(rpc),
+            "last_fail": _rpc_failures[rpc]["last_fail"]
+        }
+        for rpc in POLYGON_RPCS
+    }
+
 def fetch_chainlink_eth_sync() -> Optional[float]:
     """Synchronous Chainlink ETH/USD price read for precise PriceToBeat fallbacks."""
     for rpc in POLYGON_RPCS:
-        try:
-            w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 5}))
-            if w3.is_connected():
-                contract = w3.eth.contract(
-                    address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
-                    abi=CHAINLINK_ABI,
-                )
-                decimals = contract.functions.decimals().call()
-                data = contract.functions.latestRoundData().call()
-                price = data[1] / (10 ** decimals)
-                return price if price > 0 else None
-        except Exception as e:
-            log.debug("Chainlink RPC %s failed: %s", rpc, e)
+        if _should_skip_rpc(rpc):
             continue
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                _throttle_request(rpc)
+                w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 5}))
+                if w3.is_connected():
+                    contract = w3.eth.contract(
+                        address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
+                        abi=CHAINLINK_ABI,
+                    )
+                    decimals = contract.functions.decimals().call()
+                    data = contract.functions.latestRoundData().call()
+                    price = data[1] / (10 ** decimals)
+                    return price if price > 0 else None
+            except Exception as e:
+                is_rate_limit = _is_rate_limited(e)
+                if is_rate_limit:
+                    backoff = min(2 ** attempt * 5, 60)
+                    log.warning("Rate limited on %s, backing off %ds", rpc, backoff)
+                    _record_rpc_failure(rpc, True)
+                    if attempt < max_retries - 1:
+                        time.sleep(backoff)
+                    else:
+                        break
+                else:
+                    log.debug("Chainlink RPC %s failed: %s", rpc, e)
+                    _record_rpc_failure(rpc, False)
+                    break
     return None
 
 def fetch_historical_chainlink_eth_sync(target_ts: int) -> Optional[float]:
@@ -91,33 +156,50 @@ def fetch_historical_chainlink_eth_sync(target_ts: int) -> Optional[float]:
     It linear-searches backwards from latestRoundData to perfectly match the Polymarket start strike.
     """
     for rpc in POLYGON_RPCS:
-        try:
-            w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 5}))
-            if w3.is_connected():
-                contract = w3.eth.contract(
-                    address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
-                    abi=CHAINLINK_ABI,
-                )
-                decimals = contract.functions.decimals().call()
-                latest = contract.functions.latestRoundData().call()
-                round_id = latest[0]
-
-                found_price = None
-                # Search backwards for up to 300 rounds
-                for i in range(300):
-                    data = contract.functions.getRoundData(round_id - i).call()
-                    up_ts = data[3]
-                    price = data[1] / (10 ** decimals)
-                    if up_ts < target_ts:
-                        # We crossed the start time boundary backwards.
-                        # The very FIRST round at or after the boundary was stored in found_price
-                        return found_price
-                    else:
-                        # Keep track of the oldest round we've seen that is still >= target_ts
-                        found_price = price
-        except Exception as e:
-            log.debug("Historical Chainlink RPC %s failed: %s", rpc, e)
+        if _should_skip_rpc(rpc):
             continue
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                _throttle_request(rpc)
+                w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 5}))
+                if w3.is_connected():
+                    contract = w3.eth.contract(
+                        address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
+                        abi=CHAINLINK_ABI,
+                    )
+                    decimals = contract.functions.decimals().call()
+                    latest = contract.functions.latestRoundData().call()
+                    round_id = latest[0]
+
+                    found_price = None
+                    # Search backwards for up to 300 rounds
+                    for i in range(300):
+                        data = contract.functions.getRoundData(round_id - i).call()
+                        up_ts = data[3]
+                        price = data[1] / (10 ** decimals)
+                        if up_ts < target_ts:
+                            # We crossed the start time boundary backwards.
+                            # The very FIRST round at or after the boundary was stored in found_price
+                            return found_price
+                        else:
+                            # Keep track of the oldest round we've seen that is still >= target_ts
+                            found_price = price
+            except Exception as e:
+                is_rate_limit = _is_rate_limited(e)
+                if is_rate_limit:
+                    backoff = min(2 ** attempt * 5, 60)
+                    log.warning("Rate limited on %s, backing off %ds", rpc, backoff)
+                    _record_rpc_failure(rpc, True)
+                    if attempt < max_retries - 1:
+                        time.sleep(backoff)
+                    else:
+                        break
+                else:
+                    log.debug("Historical Chainlink RPC %s failed: %s", rpc, e)
+                    _record_rpc_failure(rpc, False)
+                    break
     return None
 
 

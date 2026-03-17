@@ -135,7 +135,10 @@ def find_redeemable(client: ClobClient, w3: Web3, trades: List[dict]) -> List[di
                 })
 
         except Exception as e:
-            log.debug("Error checking market %s: %s", market_id, e)
+            if "429" in str(e) or "too many requests" in str(e).lower():
+                log.warning("Rate limited checking market %s: %s", market_id, e)
+            else:
+                log.debug("Error checking market %s: %s", market_id, e)
 
     return redeemable
 
