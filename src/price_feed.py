@@ -12,7 +12,7 @@ from src import config
 
 log = logging.getLogger("polybot")
 
-BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/solusdt@trade"
+BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/ethusdt@trade"
 
 async def price_feed_loop(state: dict) -> None:
     """
