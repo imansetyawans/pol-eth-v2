@@ -1,5 +1,5 @@
 """
-Market discovery — find the active SOL eth-updown-5m window via Gamma API.
+Market discovery — find the active ETH eth-updown-5m window via Gamma API.
 
 The slug format is: eth-updown-5m-{unix_timestamp}
 where the timestamp is the START time of the 5-minute window (aligned to 5m boundaries).
@@ -25,7 +25,7 @@ log = logging.getLogger("polybot")
 WINDOW_DURATION = 300  # 5 minutes in seconds
 
 # --- Chainlink Oracle Fallback Configuration ---
-CHAINLINK_SOL_USD = "0x10C8264C0935b3B9870013e057f330Ff3e9C56dC"
+CHAINLINK_ETH_USD = "0xF9680D99D6C9589e2a93a78A04A279e509205945"
 
 CHAINLINK_ABI = [
     {
@@ -66,14 +66,14 @@ CHAINLINK_ABI = [
 POLYGON_RPCS = [config.POLYGON_RPC_URL] if config.POLYGON_RPC_URL else []
 POLYGON_RPCS.extend(config.POLYGON_RPC_FALLBACKS)
 
-def fetch_chainlink_sol_sync() -> Optional[float]:
-    """Synchronous Chainlink SOL/USD price read for precise PriceToBeat fallbacks."""
+def fetch_chainlink_eth_sync() -> Optional[float]:
+    """Synchronous Chainlink ETH/USD price read for precise PriceToBeat fallbacks."""
     for rpc in POLYGON_RPCS:
         try:
             w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 5}))
             if w3.is_connected():
                 contract = w3.eth.contract(
-                    address=Web3.to_checksum_address(CHAINLINK_SOL_USD),
+                    address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
                     abi=CHAINLINK_ABI,
                 )
                 decimals = contract.functions.decimals().call()
@@ -85,9 +85,9 @@ def fetch_chainlink_sol_sync() -> Optional[float]:
             continue
     return None
 
-def fetch_historical_chainlink_sol_sync(target_ts: int) -> Optional[float]:
+def fetch_historical_chainlink_eth_sync(target_ts: int) -> Optional[float]:
     """
-    Synchronously fetches the exact Chainlink SOL/USD price at or immediately preceding target_ts.
+    Synchronously fetches the exact Chainlink ETH/USD price at or immediately preceding target_ts.
     It linear-searches backwards from latestRoundData to perfectly match the Polymarket start strike.
     """
     for rpc in POLYGON_RPCS:
@@ -95,7 +95,7 @@ def fetch_historical_chainlink_sol_sync(target_ts: int) -> Optional[float]:
             w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 5}))
             if w3.is_connected():
                 contract = w3.eth.contract(
-                    address=Web3.to_checksum_address(CHAINLINK_SOL_USD),
+                    address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
                     abi=CHAINLINK_ABI,
                 )
                 decimals = contract.functions.decimals().call()
@@ -307,7 +307,7 @@ async def market_discovery_loop(state: dict) -> None:
                     if now >= window.start_date:
                         target_ts = int(window.start_date.timestamp())
                         loop = asyncio.get_event_loop()
-                        oracle_price = await loop.run_in_executor(None, fetch_historical_chainlink_sol_sync, target_ts)
+                        oracle_price = await loop.run_in_executor(None, fetch_historical_chainlink_eth_sync, target_ts)
                         if oracle_price is not None and oracle_price > 0:
                             window.price_to_beat = oracle_price
                             log.info(
