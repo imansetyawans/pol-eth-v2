@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/imanse067687/Documents/0. Projects/new-pro/pol-btc-v2/src/**)",
+      "Read(//c/Users/imanse067687/Documents/0. Projects/new-pro/pol-btc-v2/**)",
+      "Read(//c/Users/imanse067687/Documents/0. Projects/new-pro/polymarket-5m/**)",
+      "Bash(wc -l src/*.py)",
+      "Bash(find 'C:\\\\Users\\\\imanse067687\\\\Documents\\\\0. Projects\\\\new-pro\\\\poly-eth-v2' -type f \\\\\\(-name *.js -o -name *.ts -o -name *.json \\\\\\))"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\imanse067687\\Documents\\0. Projects\\new-pro\\pol-btc-v2\\src",
+      "c:\\Users\\imanse067687\\Documents\\0. Projects\\new-pro\\pol-btc-v2",
+      "c:\\Users\\imanse067687\\Documents\\0. Projects\\new-pro\\pol-btc-v2\\.git"
+    ]
+  }
+}
