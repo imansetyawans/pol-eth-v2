@@ -299,6 +299,8 @@ async def trade_loop(client: ClobClient, state: dict, wallet_id: int = 0) -> Non
     from src.equity import get_total_equity
     from src.utils import is_in_cooldown
 
+    current_window_slug = None
+
     while True:
         # ── Cooldown Check ───────────────────────────────────────────
         if is_in_cooldown():
@@ -318,15 +320,27 @@ async def trade_loop(client: ClobClient, state: dict, wallet_id: int = 0) -> Non
             await asyncio.sleep(0.5)
             continue
 
-        now = datetime.now(timezone.utc)
-        seconds_to_close = (window.end_date - now).total_seconds()
-        state["seconds_to_close"] = seconds_to_close
-
         # ── Per-Wallet State Shortcut ────────────────────────────────────
         wallet_state = state["wallets"][wallet_id] if state.get("wallets") and wallet_id < len(state["wallets"]) else {}
         if not wallet_state:
             await asyncio.sleep(1)
             continue
+
+        # ── Window Change Reset ──────────────────────────────────────────
+        if current_window_slug != window.slug:
+            log.info("--- Wallet %d New Window Detected: %s ---", wallet_id, window.slug)
+            current_window_slug = window.slug
+            wallet_state["window_locked"] = False
+            wallet_state["position_shares"] = 0
+            wallet_state["sell_locked"] = False
+            wallet_state["last_trade"] = "No trades yet"
+            # Optional: update global state if this is the primary wallet or for general visibility
+            if wallet_id == 0:
+                state["last_trade"] = "No trades yet"
+
+        now = datetime.now(timezone.utc)
+        seconds_to_close = (window.end_date - now).total_seconds()
+        state["seconds_to_close"] = seconds_to_close
 
         # Check if we should execute a pre-close sell (configurable limit before resolution)
         if wallet_state.get("window_locked", False):
@@ -359,16 +373,6 @@ async def trade_loop(client: ClobClient, state: dict, wallet_id: int = 0) -> Non
         up_odds = state.get("up_odds", 0)
         down_odds = state.get("down_odds", 0)
         positions = state.get("positions", [])
-
-        # If window changed, reset state
-        state_window = state.get("window")
-        if not state_window or state_window.slug != window.slug:
-            log.info("--- New 5min Window Detected: %s ---", window.slug)
-            state["window"] = window
-            wallet_state["window_locked"] = False
-            wallet_state["position_shares"] = 0
-            wallet_state["sell_locked"] = False
-            state["last_trade"] = "No trades yet"
 
         # Skip trading logic if data not ready, but continue to show what we have
         if eth_price <= 0 or window.price_to_beat <= 0 or up_odds <= 0 or down_odds <= 0:

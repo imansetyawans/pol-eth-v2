@@ -395,7 +395,6 @@ async def market_discovery_loop(state: dict) -> None:
                         window.slug,
                         window.end_date.strftime("%H:%M:%S"),
                     )
-                    state["window_locked"] = False  # reset trade lock for new window
 
                 # Since Polymarket Gamma API might take 10-60+ seconds to accurately resolve
                 # the exact Chainlink strike price for the start of the window, we actively
