@@ -125,15 +125,16 @@ def fetch_chainlink_eth_sync() -> Optional[float]:
             try:
                 _throttle_request(rpc)
                 w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 5}))
-                if w3.is_connected():
-                    contract = w3.eth.contract(
-                        address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
-                        abi=CHAINLINK_ABI,
-                    )
-                    decimals = contract.functions.decimals().call()
-                    data = contract.functions.latestRoundData().call()
-                    price = data[1] / (10 ** decimals)
-                    return price if price > 0 else None
+                if not w3.is_connected():
+                    break
+                contract = w3.eth.contract(
+                    address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
+                    abi=CHAINLINK_ABI,
+                )
+                decimals = contract.functions.decimals().call()
+                data = contract.functions.latestRoundData().call()
+                price = data[1] / (10 ** decimals)
+                return price if price > 0 else None
             except Exception as e:
                 is_rate_limit = _is_rate_limited(e)
                 if is_rate_limit:
@@ -164,28 +165,30 @@ def fetch_historical_chainlink_eth_sync(target_ts: int) -> Optional[float]:
             try:
                 _throttle_request(rpc)
                 w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 5}))
-                if w3.is_connected():
-                    contract = w3.eth.contract(
-                        address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
-                        abi=CHAINLINK_ABI,
-                    )
-                    decimals = contract.functions.decimals().call()
-                    latest = contract.functions.latestRoundData().call()
-                    round_id = latest[0]
+                if not w3.is_connected():
+                    break
+                contract = w3.eth.contract(
+                    address=Web3.to_checksum_address(CHAINLINK_ETH_USD),
+                    abi=CHAINLINK_ABI,
+                )
+                decimals = contract.functions.decimals().call()
+                latest = contract.functions.latestRoundData().call()
+                round_id = latest[0]
 
-                    found_price = None
-                    # Search backwards for up to 300 rounds
-                    for i in range(300):
-                        data = contract.functions.getRoundData(round_id - i).call()
-                        up_ts = data[3]
-                        price = data[1] / (10 ** decimals)
-                        if up_ts < target_ts:
-                            # We crossed the start time boundary backwards.
-                            # The very FIRST round at or after the boundary was stored in found_price
-                            return found_price
-                        else:
-                            # Keep track of the oldest round we've seen that is still >= target_ts
-                            found_price = price
+                found_price = None
+                # Search backwards for up to 300 rounds
+                for i in range(300):
+                    data = contract.functions.getRoundData(round_id - i).call()
+                    up_ts = data[3]
+                    price = data[1] / (10 ** decimals)
+                    if up_ts < target_ts:
+                        # We crossed the start time boundary backwards.
+                        # The very FIRST round at or after the boundary was stored in found_price
+                        return found_price
+                    else:
+                        # Keep track of the oldest round we've seen that is still >= target_ts
+                        found_price = price
+                return found_price
             except Exception as e:
                 is_rate_limit = _is_rate_limited(e)
                 if is_rate_limit:
