@@ -158,6 +158,7 @@ def fetch_historical_chainlink_eth_sync(target_ts: int) -> Optional[float]:
     Uses binary search for efficiency (9 calls vs 300).
     """
     if target_ts in _historical_price_cache:
+        log.debug("Cache hit for timestamp %s", target_ts)
         return _historical_price_cache[target_ts]
 
     for rpc in POLYGON_RPCS:
@@ -396,21 +397,25 @@ async def market_discovery_loop(state: dict) -> None:
                     )
                     state["window_locked"] = False  # reset trade lock for new window
 
-                # Since Polymarket Gamma API might take 10-60+ seconds to accurately resolve 
-                # the exact Chainlink strike price for the start of the window, we actively 
+                # Since Polymarket Gamma API might take 10-60+ seconds to accurately resolve
+                # the exact Chainlink strike price for the start of the window, we actively
                 # binary-search the Chainlink Oracle historically for the exact start_date.
                 if window.price_to_beat == 0:
                     now = datetime.now(timezone.utc)
                     if now >= window.start_date:
                         target_ts = int(window.start_date.timestamp())
-                        loop = asyncio.get_event_loop()
-                        oracle_price = await loop.run_in_executor(None, fetch_historical_chainlink_eth_sync, target_ts)
-                        if oracle_price is not None and oracle_price > 0:
-                            window.price_to_beat = oracle_price
-                            log.info(
-                                "Accurately fetched historical start-of-window Chainlink Oracle price %s for %s",
-                                oracle_price, window.slug
-                            )
+                        # Check cache first to avoid redundant executor calls
+                        if target_ts in _historical_price_cache:
+                            window.price_to_beat = _historical_price_cache[target_ts]
+                        else:
+                            loop = asyncio.get_event_loop()
+                            oracle_price = await loop.run_in_executor(None, fetch_historical_chainlink_eth_sync, target_ts)
+                            if oracle_price is not None and oracle_price > 0:
+                                window.price_to_beat = oracle_price
+                                log.info(
+                                    "Accurately fetched historical start-of-window Chainlink Oracle price %s for %s",
+                                    oracle_price, window.slug
+                                )
                 
                 # Preserve priceToBeat from previous iteration (already found)
                 if (window.price_to_beat == 0
