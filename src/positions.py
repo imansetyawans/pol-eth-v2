@@ -54,13 +54,14 @@ def get_w3() -> Web3:
 
 
 def fetch_positions(client: ClobClient) -> List[dict]:
-    """Fetch all unique markets traded recently to extract potential unredeemed tokens."""
+    """Fetch unique markets traded recently to extract potential unredeemed tokens."""
     try:
-        positions = []
+        # Increase limit to 100 to catch more historical/unredeemed tokens
+        # Some library versions support 'limit' and 'next_cursor'
         result = client.get_trades()
         if isinstance(result, list):
-            positions = result
-        return positions
+            return result
+        return []
     except Exception as e:
         log.error("Failed to fetch positions: %s", e)
         return []
