@@ -68,7 +68,7 @@ NEG_RISK_ADAPTER_ADDRESS: str = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
 
 # ── Timing ───────────────────────────────────────────────────────
 DASHBOARD_REFRESH_PER_SECOND: int = 1  # 500ms
-POSITION_POLL_INTERVAL: int = 1  # seconds
+POSITION_POLL_INTERVAL: int = 5  # seconds
 MARKET_RETRY_INTERVAL: int = 1  # seconds when idle
 PRICE_FEED_INTERVAL: float = 1.0  # seconds
 

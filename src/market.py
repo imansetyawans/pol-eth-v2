@@ -71,6 +71,7 @@ POLYGON_RPCS.extend(config.POLYGON_RPC_FALLBACKS)
 # Rate limiting protection
 _rpc_failures = defaultdict(lambda: {"count": 0, "last_fail": 0})
 _last_request_time = defaultdict(float)
+_historical_price_cache = {}
 CIRCUIT_BREAKER_THRESHOLD = 5
 CIRCUIT_BREAKER_COOLDOWN = 300
 MIN_REQUEST_INTERVAL = 0.2
@@ -154,8 +155,11 @@ def fetch_chainlink_eth_sync() -> Optional[float]:
 def fetch_historical_chainlink_eth_sync(target_ts: int) -> Optional[float]:
     """
     Synchronously fetches the exact Chainlink ETH/USD price at or immediately preceding target_ts.
-    It linear-searches backwards from latestRoundData to perfectly match the Polymarket start strike.
+    Uses binary search for efficiency (9 calls vs 300).
     """
+    if target_ts in _historical_price_cache:
+        return _historical_price_cache[target_ts]
+
     for rpc in POLYGON_RPCS:
         if _should_skip_rpc(rpc):
             continue
@@ -175,20 +179,28 @@ def fetch_historical_chainlink_eth_sync(target_ts: int) -> Optional[float]:
                 latest = contract.functions.latestRoundData().call()
                 round_id = latest[0]
 
+                # Binary search for target timestamp
+                left, right = 0, 300
                 found_price = None
-                # Search backwards for up to 300 rounds
-                for i in range(300):
-                    data = contract.functions.getRoundData(round_id - i).call()
-                    up_ts = data[3]
+
+                while left <= right:
+                    mid = (left + right) // 2
+                    data = contract.functions.getRoundData(round_id - mid).call()
+                    ts = data[3]
                     price = data[1] / (10 ** decimals)
-                    if up_ts < target_ts:
-                        # We crossed the start time boundary backwards.
-                        # The very FIRST round at or after the boundary was stored in found_price
-                        return found_price
-                    else:
-                        # Keep track of the oldest round we've seen that is still >= target_ts
+
+                    if ts == target_ts:
                         found_price = price
-                return found_price
+                        break
+                    elif ts > target_ts:
+                        left = mid + 1
+                        found_price = price
+                    else:
+                        right = mid - 1
+
+                if found_price:
+                    _historical_price_cache[target_ts] = found_price
+                    return found_price
             except Exception as e:
                 is_rate_limit = _is_rate_limited(e)
                 if is_rate_limit:
