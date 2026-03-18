@@ -133,6 +133,15 @@ def find_redeemable(client: ClobClient, w3: Web3, trades: List[dict]) -> List[di
                     "outcome": "Winning",  # Triggers equity calculation logic
                     "size": bal / 1e6      # Winning tokens redeem 1:1 for USDC (6 decimals)
                 })
+            elif config.REDEEM_LOSSES:
+                # Market closed, but this token lost. Include for cleanup if enabled.
+                redeemable.append({
+                    "conditionId": market_id,
+                    "asset_id": asset_id,
+                    "resolved": True,
+                    "outcome": "Lost",
+                    "size": 0
+                })
 
         except Exception as e:
             if "429" in str(e) or "too many requests" in str(e).lower():
@@ -171,8 +180,8 @@ async def redeem_positions(client: ClobClient, w3: Web3, redeemable: List[dict])
         base_nonce = w3.eth.get_transaction_count(account.address)
         tx_index = 0
 
-        # Filter to only the ones marked resolved and winning
-        to_redeem = [pos for pos in redeemable if pos.get("resolved") and pos.get("outcome") == "Winning"]
+        # Filter all resolved positions for cleanup (Winning or optionally Lost)
+        to_redeem = [pos for pos in redeemable if pos.get("resolved")]
 
         if not to_redeem:
             return 0
